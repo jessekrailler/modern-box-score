@@ -12,6 +12,21 @@ month <- "07"
 day <- "05"
 
 
+fixDes <- function(des){
+     for(q in 1:3){
+          des <- str_replace_all(des, pattern = "  ", replacement = " ")
+     }
+     
+     des <- str_replace_all(des, pattern = " Jr\\. ", replacement = " ")
+     des <- str_replace_all(des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
+     des <- str_replace_all(des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
+     des <- str_replace_all(des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
+     des <- str_replace_all(des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
+     des <- str_replace_all(des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
+     des <- str_replace_all(des, pattern = "John Ryan", replacement = "JohnRyan")
+     des <- str_replace_all(des, pattern = "Michael A. ", replacement = "Michael ")
+     return(des)
+}
 
 date.url <- paste0("http://www.espn.com/mlb/schedule/_/date/", year, month, day)
 
@@ -91,19 +106,31 @@ for(inning in 1:length(innings.list)){
           for(event in 1:length(innings.list[[inning]][[half]])){
                if(names(innings.list[[inning]][[half]][event])=="atbat"){
                     df <- unlist(innings.list[[inning]][[half]][[event]]$.attrs) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
-                    df$inn <- inning
-                    df$half <- half
-                    df$event <- event
+               } else if(names(innings.list[[inning]][[half]][event])=="action"){
+                    df <- unlist(innings.list[[inning]][[half]][[event]]) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
+               }
+               
+               df$inn <- inning
+               df$half <- half
+               df$event <- event
+               df$des <- fixDes(df$des)
+               
+               words <- str_split(df$des[1], pattern = " ")[[1]]
+               words <- words[which(words != "")]
+               words <- gsub(words, pattern = ".", replace = "", fixed = T)
+               
+               df$name <- paste0(words[2], ", ", words[1])
+               
+               if(names(innings.list[[inning]][[half]][event])=="atbat"){
+                    if(str_detect(df$des[1], pattern = "intentionally walks")){
+                         df$des[1] <- paste(words[length(words) - 1], words[length(words)], "intentionally walks.")
+                    }
                     if(!nrow(atbats.df)){
                          atbats.df <- df
                     } else {
                          atbats.df <- bind_rows(atbats.df, df)
                     }
                } else if(names(innings.list[[inning]][[half]][event])=="action"){
-                    df <- unlist(innings.list[[inning]][[half]][[event]]) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
-                    df$inn <- inning
-                    df$half <- half
-                    df$event <- event
                     if(!nrow(events.df)){
                          events.df <- df
                     } else {
@@ -119,46 +146,12 @@ for(inning in 1:length(innings.list)){
 
 events.df$o <- as.numeric(events.df$o)
 
-for(q in 1:3){
-     events.df$des <- str_replace_all(events.df$des, pattern = "  ", replacement = " ")
-     atbats.df$des <- str_replace_all(atbats.df$des, pattern = "  ", replacement = " ")
-}
 
-events.df$des <- str_replace_all(events.df$des, pattern = " Jr\\. ", replacement = " ")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = " Jr\\. ", replacement = " ")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "John Ryan", replacement = "JohnRyan")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "John Ryan", replacement = "JohnRyan")
-
-events.df$des <- str_replace_all(events.df$des, pattern = "Michael A. ", replacement = "Michael ")
-atbats.df$des <- str_replace_all(atbats.df$des, pattern = "Michael A. ", replacement = "Michael ")
-
-for(row in 1:nrow(atbats.df)){
-     if(str_detect(atbats.df$des[row], pattern = "intentionally walks")){
-          words <- str_split(atbats.df$des[row], pattern = " ")[[1]]
-          words <- words[which(words != "")]
-          words <- gsub(words, pattern = ".", replace = "", fixed = T)
-          atbats.df$des[row] <- paste(words[length(words) - 1], words[length(words)], "intentionally walks.")
-     }
-}
-
-
-atbats.df <- atbats.df %>% arrange(as.numeric(event_num)) %>% mutate(prevOut = lag(o)) %>% mutate(turn = o != prevOut)
+atbats.df <- atbats.df %>% 
+     arrange(as.numeric(event_num)) %>% 
+     mutate(prevOut = lag(o)) %>% 
+     mutate(turn = o != prevOut) 
+     
 atbats.df$turn <- ifelse(is.na(atbats.df$turn), TRUE, atbats.df$turn)
 atbats.df$o <- as.numeric(atbats.df$o)
 atbats.df$o <- ifelse(atbats.df$turn & atbats.df$o > 0, atbats.df$o - 1 , atbats.df$o)
@@ -430,3 +423,28 @@ ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fil
            axis.ticks = element_blank(), axis.text = element_blank(), axis.title=element_blank(), 
            panel.background=element_rect(fill="white"))
 
+singles.totals <- singles %>%
+     group_by(half, name) %>%
+     summarize(singles = n())
+
+doubles.totals <- doubles %>%
+     group_by(half, name) %>%
+     summarize(doubles = n())
+
+triples.totals <- triples %>%
+     group_by(half, name) %>%
+     summarize(triples = n())
+
+homer.totals <- homers %>%
+     group_by(half, name) %>%
+     summarize(homers = n())
+
+strikeouts.totals <- strikeouts %>%
+     group_by(half, name) %>%
+     summarize(Ks = n())
+
+alltotals <- singles.totals %>%
+     full_join(doubles.totals) %>%
+     full_join(triples.totals) %>%
+     full_join(homer.totals) %>%
+     full_join(strikeouts.totals)
