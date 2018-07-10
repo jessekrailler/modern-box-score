@@ -247,15 +247,25 @@ shinyServer(function(input, output, session) {
                filter(str_detect(des, pattern = "singles")) %>%
                mutate(x = (x1 + x2) / 2, y = (y1 + y2) / 2) 
           
+          # horizdoubles <- allbars %>%
+          #      filter(str_detect(des, pattern = "doubles"), o == 1 ) %>%
+          #      mutate(d1x = (x1 + x2) / 2 - .1 * singlebarlength, d1y = (y1 + y2) / 2) %>%
+          #      mutate(d2x = (x1 + x2) / 2 + .1 * singlebarlength, d2y = (y1 + y2) / 2)
+          
           horizdoubles <- allbars %>%
                filter(str_detect(des, pattern = "doubles"), o == 1 ) %>%
-               mutate(d1x = (x1 + x2) / 2 - .1 * singlebarlength, d1y = (y1 + y2) / 2) %>%
-               mutate(d2x = (x1 + x2) / 2 + .1 * singlebarlength, d2y = (y1 + y2) / 2)
+               mutate(d1x = (x1 + x2) / 2, d1y = (y1 + y2) / 2 - barwidth * .15) %>%
+               mutate(d2x = (x1 + x2) / 2, d2y = (y1 + y2) / 2 + barwidth * .15)
+          
+          # vertdoubles <- allbars %>%
+          #      filter(str_detect(des, pattern = "doubles"), o %in% c(0, 2)) %>%
+          #      mutate(d1x = (x1 + x2) / 2, d1y = (y1 + y2) / 2 - .1 * singlebarlength) %>%
+          #      mutate(d2x = (x1 + x2) / 2, d2y = (y1 + y2) / 2 + .1 * singlebarlength)
           
           vertdoubles <- allbars %>%
                filter(str_detect(des, pattern = "doubles"), o %in% c(0, 2)) %>%
-               mutate(d1x = (x1 + x2) / 2, d1y = (y1 + y2) / 2 - .1 * singlebarlength) %>%
-               mutate(d2x = (x1 + x2) / 2, d2y = (y1 + y2) / 2 + .1 * singlebarlength)
+               mutate(d1x = (x1 + x2) / 2 - barwidth * .15, d1y = (y1 + y2) / 2) %>%
+               mutate(d2x = (x1 + x2) / 2 + barwidth * .15, d2y = (y1 + y2) / 2)
           
           doubles <- horizdoubles %>%
                bind_rows(vertdoubles)
