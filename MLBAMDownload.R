@@ -6,10 +6,12 @@ library(stringr)
 library(lubridate)
 library(ggplot2)
 library(plotly)
+library(readxl)
+library(tidyr)
 
 year <- "2018"
 month <- "07"
-day <- "05"
+day <- "10"
 
 
 fixDes <- function(des){
@@ -27,6 +29,30 @@ fixDes <- function(des){
      des <- str_replace_all(des, pattern = "Michael A. ", replacement = "Michael ")
      return(des)
 }
+
+basesitOf <- function(b1, b2, b3){
+     b1 <- ifelse(b1 == "", NA, b1)
+     b2 <- ifelse(b2 == "", NA, b1)
+     b3 <- ifelse(b3 == "", NA, b1)
+     basesit <- ifelse(is.na(b1) & is.na(b2) & is.na(b3), 1, NA) #bases empty
+     basesit <- ifelse(!is.na(b1) & is.na(b2) & is.na(b3), 2, basesit) #runner on first
+     basesit <- ifelse(is.na(b1) & !is.na(b2) & is.na(b3), 3, basesit) #runner on second
+     basesit <- ifelse(!is.na(b1) & !is.na(b2) & is.na(b3), 4, basesit) #runner on first and second
+     basesit <- ifelse(is.na(b1) & is.na(b2) & !is.na(b3), 5, basesit) #runner on third
+     basesit <- ifelse(!is.na(b1) & is.na(b2) & !is.na(b3), 6, basesit) #runner on first and third
+     basesit <- ifelse(is.na(b1) & !is.na(b2) & !is.na(b3), 7, basesit) #runner on second and third
+     basesit <- ifelse(!is.na(b1) & !is.na(b2) & !is.na(b3), 8, basesit) #bases loaded
+     basesit
+}
+
+setwd("~/ModernBoxScore/modern-box-score/")
+
+rawWE <- read_excel("WPA/WinExpRaw.xlsx") %>%
+     gather("diff", "winexp", which(LETTERS == "E"):(which(LETTERS == "I") + 26)) %>%
+     mutate(home_away = as.numeric(diff)) %>%
+     select(-diff) %>%
+     dplyr::rename(inn.winexp = inn) %>%
+     arrange(inn.winexp, half, o, basesit, home_away)
 
 date.url <- paste0("http://www.espn.com/mlb/schedule/_/date/", year, month, day)
 
@@ -70,7 +96,24 @@ games$home <- str_replace(games$home, pattern = "laa", replacement = "ana")
 games$away <- str_replace(games$away, pattern = "lad", replacement = "lan")
 games$home <- str_replace(games$home, pattern = "lad", replacement = "lan")
 
-g <- 6
+games$winscore <- NA
+games$losescore <- NA
+games$winteam <- NA
+
+for(g in 1:nrow(games)){
+     tolook <- gsub("\\s*\\([^\\)]+\\)", "", games$V3[g])
+     scores <- str_split(tolook, pattern = ",")[[1]]
+     games$winscore[g] <- scores[1] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
+     games$losescore[g] <- scores[2] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
+     winner <- scores[1] %>% str_sub(1,3) %>% trimws() %>% tolower()
+     games$winteam[g] <- ifelse(winner == games$home[g], "home", "away")
+}
+
+g <- 11
+
+awayWin <- function(){
+     games$winteam[g] == "away"
+}
 
 awayteam <- games$away[g]
 hometeam <- games$home[g]
@@ -157,6 +200,16 @@ atbats.df$o <- as.numeric(atbats.df$o)
 atbats.df$o <- ifelse(atbats.df$turn & atbats.df$o > 0, atbats.df$o - 1 , atbats.df$o)
 atbats.df <- atbats.df %>% arrange(as.numeric(event_num))
 splits <- atbats.df %>% group_by(half, inn, o) %>% count()
+
+atbats.df$basesit <- basesitOf(atbats.df$b1, atbats.df$b2, atbats.df$b3)
+atbats.df$inn.winexp <- ifelse(atbats.df$inn > 9, 9, atbats.df$inn)
+atbats.df <- atbats.df %>%
+     mutate(home_away = as.numeric(home_team_runs) - as.numeric(away_team_runs)) %>%
+     left_join(rawWE)
+
+if(awayWin()){
+     atbats.df$winexp <- 1 - atbats.df$winexp
+}
 
 new <- atbats.df[0,]
 
@@ -397,10 +450,15 @@ color.vec1 <- scores %>% arrange(color) %>% select(color) %>% distinct() %>% unl
 color.vec2 <- scores %>% arrange(color2) %>% select(color2) %>% distinct() %>% unlist(use.names = F)
 color.vec <- c(color.vec1, color.vec2)
 
-ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = batorder), color = "white", size =2) + 
+
+
+#allbars2 <- allbars
+print(tail(allbars$winexp))
+
+ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp), color = "white", size =2) + 
      geom_curve(data = segments, aes(x = x1, xend = x2, y = y1, yend = y2), curvature = -.5, size = 2, color = "gray") + 
      geom_segment(data = allbars, aes(x= -10 * max(allbars$inn) - 10, xend = 10 * max(allbars$inn) + 10, y = 0, yend = 0), color = "white", size = 5) + 
-     geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = batorder, color = color), size =2) + 
+     geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp, color = color), size =2) + 
      #geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dotted", size =2, alpha = 0) + 
      geom_rect(data = scores %>% arrange(color2), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dashed", size = 1, alpha = 0) + 
      scale_color_manual(values = color.vec) +
@@ -428,7 +486,7 @@ ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fil
      
      #geom_point(data = pitchingchanges, aes(x, y), color = "black", size = dotsize.big, shape = 18) + 
      
-     scale_fill_gradient(low = "#E8E8E8", high = "black") +
+     scale_fill_gradient(low = "#E8E8E8", high = "black", limits = c(0, 1)) +
      theme(legend.position="none", panel.grid.minor=element_blank(), panel.grid.major=element_blank(),
            axis.ticks = element_blank(), axis.text = element_blank(), axis.title=element_blank(), 
            panel.background=element_rect(fill="white"))
