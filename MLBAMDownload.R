@@ -11,7 +11,7 @@ library(tidyr)
 
 year <- "2018"
 month <- "07"
-day <- "10"
+day <- "15"
 
 
 fixDes <- function(des){
@@ -27,6 +27,11 @@ fixDes <- function(des){
      des <- str_replace_all(des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
      des <- str_replace_all(des, pattern = "John Ryan", replacement = "JohnRyan")
      des <- str_replace_all(des, pattern = "Michael A. ", replacement = "Michael ")
+     
+     over <- str_locate(des, pattern = "was overturned: ")[2]
+     if(!is.na(over)){
+          des <- str_sub(des, (over + 1), -1)
+     }
      return(des)
 }
 
@@ -45,6 +50,22 @@ basesitOf <- function(b1, b2, b3){
      basesit
 }
 
+fixAbrev <- function(abr){
+     if(abr == "nyy") return("nya")
+     if(abr == "nym") return("nyn")
+     if(abr == "wsh") return("was")
+     if(abr == "chc") return("chn")
+     if(abr == "kc") return("kca")
+     if(abr == "sd") return("sdn")
+     if(abr == "chw") return("cha")
+     if(abr == "stl") return("sln")
+     if(abr == "tb") return("tba")
+     if(abr == "sf") return("sfn")
+     if(abr == "laa") return("ana")
+     if(abr == "lad") return("lan")
+     else return(abr)
+}
+
 setwd("~/ModernBoxScore/modern-box-score/")
 
 rawWE <- read_excel("WPA/WinExpRaw.xlsx") %>%
@@ -60,56 +81,26 @@ games <- readHTMLTable(date.url)[[1]]
 games$away <- str_sub(games$V1, -3, -1) %>% trimws() %>% tolower()
 games$home <- str_sub(games$V2, -3, -1) %>% trimws() %>% tolower()
 
-games$away <- str_replace(games$away, pattern = "nyy", replacement = "nya")
-games$home <- str_replace(games$home, pattern = "nyy", replacement = "nya") 
-
-games$away <- str_replace(games$away, pattern = "nym", replacement = "nyn")
-games$home <- str_replace(games$home, pattern = "nym", replacement = "nyn")
-
-games$away <- str_replace(games$away, pattern = "wsh", replacement = "was")
-games$home <- str_replace(games$home, pattern = "wsh", replacement = "was")
-
-games$away <- str_replace(games$away, pattern = "chc", replacement = "chn")
-games$home <- str_replace(games$home, pattern = "chc", replacement = "chn")
-
-games$away <- str_replace(games$away, pattern = "kc", replacement = "kca")
-games$home <- str_replace(games$home, pattern = "kc", replacement = "kca")
-
-games$away <- str_replace(games$away, pattern = "sd", replacement = "sdn")
-games$home <- str_replace(games$home, pattern = "sd", replacement = "sdn")
-
-games$away <- str_replace(games$away, pattern = "chw", replacement = "cha")
-games$home <- str_replace(games$home, pattern = "chw", replacement = "cha")
-
-games$away <- str_replace(games$away, pattern = "stl", replacement = "sln")
-games$home <- str_replace(games$home, pattern = "stl", replacement = "sln")
-
-games$away <- str_replace(games$away, pattern = "tb", replacement = "tba")
-games$home <- str_replace(games$home, pattern = "tb", replacement = "tba")
-
-games$away <- str_replace(games$away, pattern = "sf", replacement = "sfn")
-games$home <- str_replace(games$home, pattern = "sf", replacement = "sfn")
-
-games$away <- str_replace(games$away, pattern = "laa", replacement = "ana")
-games$home <- str_replace(games$home, pattern = "laa", replacement = "ana")
-
-games$away <- str_replace(games$away, pattern = "lad", replacement = "lan")
-games$home <- str_replace(games$home, pattern = "lad", replacement = "lan")
+#games$away <- fixAbrev(games$away)
+#games$home <- fixAbrev(games$home)
 
 games$winscore <- NA
 games$losescore <- NA
 games$winteam <- NA
 
 for(g in 1:nrow(games)){
+     games$away[g] <- fixAbrev(games$away[g])
+     games$home[g] <- fixAbrev(games$home[g])
+     
      tolook <- gsub("\\s*\\([^\\)]+\\)", "", games$V3[g])
      scores <- str_split(tolook, pattern = ",")[[1]]
      games$winscore[g] <- scores[1] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
      games$losescore[g] <- scores[2] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
-     winner <- scores[1] %>% str_sub(1,3) %>% trimws() %>% tolower()
+     winner <- scores[1] %>% str_sub(1,3) %>% trimws() %>% tolower() %>% fixAbrev()
      games$winteam[g] <- ifelse(winner == games$home[g], "home", "away")
 }
 
-g <- 11
+g <- 9
 
 awayWin <- function(){
      games$winteam[g] == "away"
@@ -148,7 +139,10 @@ for(inning in 1:length(innings.list)){
           if(!length(innings.list[[inning]][[half]])) next
           for(event in 1:length(innings.list[[inning]][[half]])){
                if(names(innings.list[[inning]][[half]][event])=="atbat"){
-                    df <- unlist(innings.list[[inning]][[half]][[event]]$.attrs) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
+                    df <- try(unlist(innings.list[[inning]][[half]][[event]]$.attrs) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F), silent = T)
+                    if(class(df) == "try-error"){
+                         next
+                    }
                } else if(names(innings.list[[inning]][[half]][event])=="action"){
                     df <- unlist(innings.list[[inning]][[half]][[event]]) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
                }
@@ -162,12 +156,15 @@ for(inning in 1:length(innings.list)){
                words <- words[which(words != "")]
                words <- gsub(words, pattern = ".", replace = "", fixed = T)
                
-               df$name <- paste0(words[2], ", ", words[1])
+               df$name <- paste0(words[6], ", ", words[5])
                
                if(names(innings.list[[inning]][[half]][event])=="atbat"){
                     if(str_detect(df$des[1], pattern = "intentionally walks")){
-                         df$des[1] <- paste(words[length(words) - 1], words[length(words)], "intentionally walks.")
+                         df$des[1] <- paste(words[5], words[6], "intentionally walks.")
                     }
+                    #if(str_detect(df$des[1], pattern = "hits a grand slam")){
+                    #     df$des[1] <- gsub(df$des[1], pattern = "hits a grand slam", replacement = "homers")
+                    #}
                     if(!nrow(atbats.df)){
                          atbats.df <- df
                     } else {
@@ -203,8 +200,11 @@ splits <- atbats.df %>% group_by(half, inn, o) %>% count()
 
 atbats.df$basesit <- basesitOf(atbats.df$b1, atbats.df$b2, atbats.df$b3)
 atbats.df$inn.winexp <- ifelse(atbats.df$inn > 9, 9, atbats.df$inn)
+atbats.df$home_away <- as.numeric(atbats.df$home_team_runs) - as.numeric(atbats.df$away_team_runs)
+atbats.df$home_away <- ifelse(atbats.df$home_away > 15, 15, atbats.df$home_away)
+atbats.df$home_away <- ifelse(atbats.df$home_away < -15, -15, atbats.df$home_away)
+
 atbats.df <- atbats.df %>%
-     mutate(home_away = as.numeric(home_team_runs) - as.numeric(away_team_runs)) %>%
      left_join(rawWE)
 
 if(awayWin()){
@@ -296,17 +296,29 @@ vertdoubles <- allbars %>%
 doubles <- horizdoubles %>%
      bind_rows(vertdoubles)
 
+# horiztriples <- allbars %>%
+#      filter(str_detect(des, pattern = "triples"), o == 1 ) %>%
+#      mutate(t1x = (x1 + x2) / 2 - .15 * singlebarlength, t1y = (y1 + y2) / 2) %>%
+#      mutate(t2x = (x1 + x2) / 2 + .15 * singlebarlength, t2y = (y1 + y2) / 2) %>%
+#      mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+
 horiztriples <- allbars %>%
      filter(str_detect(des, pattern = "triples"), o == 1 ) %>%
-     mutate(t1x = (x1 + x2) / 2 - .15 * singlebarlength, t1y = (y1 + y2) / 2) %>%
-     mutate(t2x = (x1 + x2) / 2 + .15 * singlebarlength, t2y = (y1 + y2) / 2) %>%
-     mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+     mutate(t1x = (x1 + x2) / 2 - .12 * barwidth, t1y = (y1 + y2) / 2 - barwidth * .12 * sign(y1)) %>%
+     mutate(t2x = (x1 + x2) / 2 + .12 * barwidth, t2y = (y1 + y2) / 2 - barwidth * .12 * sign(y1)) %>%
+     mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2 + barwidth * .12 * sign(y1))
+
+# verttriples <- allbars %>%
+#      filter(str_detect(des, pattern = "triples"), o %in% c(0, 2)) %>%
+#      mutate(t1x = (x1 + x2) / 2, t1y = (y1 + y2) / 2 - .15 * singlebarlength) %>%
+#      mutate(t2x = (x1 + x2) / 2, t2y = (y1 + y2) / 2 + .15 * singlebarlength) %>%
+#      mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
 
 verttriples <- allbars %>%
      filter(str_detect(des, pattern = "triples"), o %in% c(0, 2)) %>%
-     mutate(t1x = (x1 + x2) / 2, t1y = (y1 + y2) / 2 - .15 * singlebarlength) %>%
-     mutate(t2x = (x1 + x2) / 2, t2y = (y1 + y2) / 2 + .15 * singlebarlength) %>%
-     mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+     mutate(t1x = (x1 + x2) / 2 - barwidth * .12 * sign(x1), t1y = (y1 + y2) / 2 - .12 * barwidth) %>%
+     mutate(t2x = (x1 + x2) / 2 - barwidth * .12 * sign(x1), t2y = (y1 + y2) / 2 + .12 * barwidth) %>%
+     mutate(t3x = (x1 + x2) / 2 + barwidth * .12 * sign(x1), t3y = (y1 + y2) / 2)
 
 triples <- horiztriples %>%
      bind_rows(verttriples)
@@ -345,7 +357,7 @@ scoringplays.events <- events.df %>%
 scoringplays <- scoringplays %>% bind_rows(scoringplays.events)
 
 scores <- allbars[0,]
-i <- 7
+i <- 12
 for(i in 1:nrow(scoringplays)){
      words <- str_split(scoringplays$des[i], pattern = " ")[[1]]
      words <- words[which(words != "")]
@@ -446,11 +458,13 @@ hrsize.small <- 4
 
 #allbars$batorder <- factor(allbars$batorder, levels = c(1:9))
 
+scores <- scores %>% arrange(color)
+
 color.vec1 <- scores %>% arrange(color) %>% select(color) %>% distinct() %>% unlist(use.names = F)
 color.vec2 <- scores %>% arrange(color2) %>% select(color2) %>% distinct() %>% unlist(use.names = F)
-color.vec <- c(color.vec1, color.vec2)
-
-
+#color.vec <- c(color.vec1, color.vec2)
+color.vec <- unique(c(scores$color, scores$color2))
+names(color.vec) <- color.vec
 
 #allbars2 <- allbars
 print(tail(allbars$winexp))
@@ -458,9 +472,9 @@ print(tail(allbars$winexp))
 ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp), color = "white", size =2) + 
      geom_curve(data = segments, aes(x = x1, xend = x2, y = y1, yend = y2), curvature = -.5, size = 2, color = "gray") + 
      geom_segment(data = allbars, aes(x= -10 * max(allbars$inn) - 10, xend = 10 * max(allbars$inn) + 10, y = 0, yend = 0), color = "white", size = 5) + 
-     geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp, color = color), size =2) + 
+     geom_rect(data = scores, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp, color = color), size =2) + 
      #geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dotted", size =2, alpha = 0) + 
-     geom_rect(data = scores %>% arrange(color2), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dashed", size = 1, alpha = 0) + 
+     geom_rect(data = scores, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dashed", size = 1, alpha = 0) + 
      scale_color_manual(values = color.vec) +
      geom_point(data = singles, aes(x, y), color = "white", size = dotsize.big) + 
      geom_point(data = singles, aes(x, y), color = "black", size = dotsize.small) + 
@@ -474,8 +488,9 @@ ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fil
      geom_point(data = triples, aes(t1x, t1y), color = "black", size = dotsize.small) + 
      geom_point(data = triples, aes(t2x, t2y), color = "black", size = dotsize.small) + 
      geom_point(data = triples, aes(t3x, t3y), color = "black", size = dotsize.small) + 
-     geom_point(data = walks, aes(x, y), color = "black", size = dotsize.big) + 
-     geom_point(data = walks, aes(x, y), color = "white", size = dotsize.small) + 
+     #geom_point(data = walks, aes(x, y), color = "black", size = dotsize.big) + 
+     #geom_point(data = walks, aes(x, y), color = "white", size = dotsize.small) + 
+     geom_point(data = walks, aes(x, y), color = "green", size = dotsize.big, shape = 18) + 
      geom_point(data = homers, aes(x, y), color = "white", size = hrsize.big) + 
      geom_point(data = homers, aes(x, y), color = "black", size = hrsize.small, shape = 18) + 
      #geom_point(data = strikeouts, aes(x, y), color = "white", size = dotsize.big) + 

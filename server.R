@@ -5,6 +5,8 @@ library(dplyr)
 library(stringr)
 library(lubridate)
 library(ggplot2)
+library(readxl)
+library(tidyr)
 
 shinyServer(function(input, output, session) {
      
@@ -18,6 +20,27 @@ shinyServer(function(input, output, session) {
                dplyr::rename(inn.winexp = inn) %>%
                arrange(inn.winexp, half, o, basesit, home_away)
      })
+     
+     fixDes <- function(des){
+          for(q in 1:3){
+               des <- str_replace_all(des, pattern = "  ", replacement = " ")
+          }
+          
+          des <- str_replace_all(des, pattern = " Jr\\. ", replacement = " ")
+          des <- str_replace_all(des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
+          des <- str_replace_all(des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
+          des <- str_replace_all(des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
+          des <- str_replace_all(des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
+          des <- str_replace_all(des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
+          des <- str_replace_all(des, pattern = "John Ryan", replacement = "JohnRyan")
+          des <- str_replace_all(des, pattern = "Michael A. ", replacement = "Michael ")
+          
+          over <- str_locate(des, pattern = "was overturned: ")[2]
+          if(!is.na(over)){
+               des <- str_sub(des, (over + 1), -1)
+          }
+          return(des)
+     }
      
      fixAbrev <- function(abr){
           if(abr == "nyy") return("nya")
@@ -68,12 +91,15 @@ shinyServer(function(input, output, session) {
           games$away <- str_sub(games$V1, -3, -1) %>% trimws()
           games$home <- str_sub(games$V2, -3, -1) %>% trimws()
           games$game <- 1
-          for(i in 2:nrow(games)){
-               prevgames <- games[1:(i - 1),]
-               if(games$home[i] %in% prevgames$home){
-                    games$game[i] <- 2
+          if(nrow(games) > 1){
+               for(i in 2:nrow(games)){
+                    prevgames <- games[1:(i - 1),]
+                    if(games$home[i] %in% prevgames$home){
+                         games$game[i] <- 2
+                    }
                }
           }
+          
           
           games$winscore <- NA
           games$losescore <- NA
@@ -84,7 +110,7 @@ shinyServer(function(input, output, session) {
                scores <- str_split(tolook, pattern = ",")[[1]]
                games$winscore[g] <- scores[1] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
                games$losescore[g] <- scores[2] %>% str_sub(-2, -1) %>% trimws() %>% as.numeric()
-               winner <- scores[1] %>% str_sub(1,3) %>% trimws() %>% toupper()
+               winner <- scores[1] %>% str_sub(1,3) %>% trimws() %>% toupper() %>% fixAbrev()
                print(winner)
                games$winteam[g] <- ifelse(winner == games$home[g], "home", "away")
           }
@@ -131,6 +157,7 @@ shinyServer(function(input, output, session) {
                              "mlb_", hometeam, 
                              "mlb_", gamenum, 
                              "/game_events.xml")
+          print(game.url)
           return(game.url)
      })
      
@@ -154,26 +181,41 @@ shinyServer(function(input, output, session) {
           
           atbats.df <- data.frame()
           events.df <- data.frame()
-          
+          print("test1")
           for(inning in 1:length(innings.list)){
                for(half in c("top", "bottom")){
                     if(!length(innings.list[[inning]][[half]])) next
                     for(event in 1:length(innings.list[[inning]][[half]])){
                          if(names(innings.list[[inning]][[half]][event])=="atbat"){
-                              df <- unlist(innings.list[[inning]][[half]][[event]]$.attrs) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
-                              df$inn <- inning
-                              df$half <- half
-                              df$event <- event
+                              df <- try(unlist(innings.list[[inning]][[half]][[event]]$.attrs) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F), silent = T)
+                              if(class(df) == "try-error"){
+                                   next
+                              }
+                         } else if(names(innings.list[[inning]][[half]][event])=="action"){
+                              df <- unlist(innings.list[[inning]][[half]][[event]]) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
+                         }
+                         
+                         df$inn <- inning
+                         df$half <- half
+                         df$event <- event
+                         df$des <- fixDes(df$des)
+                         
+                         words <- str_split(df$des[1], pattern = " ")[[1]]
+                         words <- words[which(words != "")]
+                         words <- gsub(words, pattern = ".", replace = "", fixed = T)
+                         
+                         df$name <- paste0(words[6], ", ", words[5])
+                         
+                         if(names(innings.list[[inning]][[half]][event])=="atbat"){
+                              if(str_detect(df$des[1], pattern = "intentionally walks")){
+                                   df$des[1] <- paste(words[5], words[6], "intentionally walks.")
+                              }
                               if(!nrow(atbats.df)){
                                    atbats.df <- df
                               } else {
                                    atbats.df <- bind_rows(atbats.df, df)
                               }
                          } else if(names(innings.list[[inning]][[half]][event])=="action"){
-                              df <- unlist(innings.list[[inning]][[half]][[event]]) %>% as.data.frame() %>% t() %>% as.data.frame(stringsAsFactors = F)
-                              df$inn <- inning
-                              df$half <- half
-                              df$event <- event
                               if(!nrow(events.df)){
                                    events.df <- df
                               } else {
@@ -184,45 +226,8 @@ shinyServer(function(input, output, session) {
                     }
                }
           }
-          
-          for(q in 1:3){
-               events.df$des <- str_replace_all(events.df$des, pattern = "  ", replacement = " ")
-               atbats.df$des <- str_replace_all(atbats.df$des, pattern = "  ", replacement = " ")
-          }
-          
+          print("test2")
           events.df$o <- as.numeric(events.df$o)
-          events.df$des <- str_replace_all(events.df$des, pattern = " Jr\\. ", replacement = " ")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = " Jr\\. ", replacement = " ")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. D\\.", replacement = "J\\.D\\.")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. J\\.", replacement = "J\\.J\\.")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. P\\.", replacement = "J\\.P\\.")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "J\\. T\\.", replacement = "J\\.T\\.")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "A\\. J\\.", replacement = "A\\.J\\.")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "John Ryan", replacement = "JohnRyan")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "John Ryan", replacement = "JohnRyan")
-          
-          events.df$des <- str_replace_all(events.df$des, pattern = "Michael A. ", replacement = "Michael ")
-          atbats.df$des <- str_replace_all(atbats.df$des, pattern = "Michael A. ", replacement = "Michael ")
-          
-          for(row in 1:nrow(atbats.df)){
-               if(str_detect(atbats.df$des[row], pattern = "intentionally walks")){
-                    words <- str_split(atbats.df$des[row], pattern = " ")[[1]]
-                    words <- words[which(words != "")]
-                    words <- gsub(words, pattern = ".", replace = "", fixed = T)
-                    atbats.df$des[row] <- paste(words[length(words) - 1], words[length(words)], "intentionally walks.")
-               }
-          }
           
           atbats.df <- atbats.df %>% arrange(as.numeric(event_num)) %>% mutate(prevOut = lag(o)) %>% mutate(turn = o != prevOut)
           atbats.df$turn <- ifelse(is.na(atbats.df$turn), TRUE, atbats.df$turn)
@@ -233,8 +238,11 @@ shinyServer(function(input, output, session) {
           
           atbats.df$basesit <- basesitOf(atbats.df$b1, atbats.df$b2, atbats.df$b3)
           atbats.df$inn.winexp <- ifelse(atbats.df$inn > 9, 9, atbats.df$inn)
+          atbats.df$home_away <- as.numeric(atbats.df$home_team_runs) - as.numeric(atbats.df$away_team_runs)
+          atbats.df$home_away <- ifelse(atbats.df$home_away > 15, 15, atbats.df$home_away)
+          atbats.df$home_away <- ifelse(atbats.df$home_away < -15, -15, atbats.df$home_away)
+          
           atbats.df <- atbats.df %>%
-               mutate(home_away = as.numeric(home_team_runs) - as.numeric(away_team_runs)) %>%
                left_join(getWinExp())
           
           if(awayWin()){
@@ -328,17 +336,29 @@ shinyServer(function(input, output, session) {
           doubles <- horizdoubles %>%
                bind_rows(vertdoubles)
           
+          # horiztriples <- allbars %>%
+          #      filter(str_detect(des, pattern = "triples"), o == 1 ) %>%
+          #      mutate(t1x = (x1 + x2) / 2 - .15 * singlebarlength, t1y = (y1 + y2) / 2) %>%
+          #      mutate(t2x = (x1 + x2) / 2 + .15 * singlebarlength, t2y = (y1 + y2) / 2) %>%
+          #      mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+          
           horiztriples <- allbars %>%
                filter(str_detect(des, pattern = "triples"), o == 1 ) %>%
-               mutate(t1x = (x1 + x2) / 2 - .15 * singlebarlength, t1y = (y1 + y2) / 2) %>%
-               mutate(t2x = (x1 + x2) / 2 + .15 * singlebarlength, t2y = (y1 + y2) / 2) %>%
-               mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+               mutate(t1x = (x1 + x2) / 2 - .12 * barwidth, t1y = (y1 + y2) / 2 - barwidth * .12 * sign(y1)) %>%
+               mutate(t2x = (x1 + x2) / 2 + .12 * barwidth, t2y = (y1 + y2) / 2 - barwidth * .12 * sign(y1)) %>%
+               mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2 + barwidth * .12 * sign(y1))
+          
+          # verttriples <- allbars %>%
+          #      filter(str_detect(des, pattern = "triples"), o %in% c(0, 2)) %>%
+          #      mutate(t1x = (x1 + x2) / 2, t1y = (y1 + y2) / 2 - .15 * singlebarlength) %>%
+          #      mutate(t2x = (x1 + x2) / 2, t2y = (y1 + y2) / 2 + .15 * singlebarlength) %>%
+          #      mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
           
           verttriples <- allbars %>%
                filter(str_detect(des, pattern = "triples"), o %in% c(0, 2)) %>%
-               mutate(t1x = (x1 + x2) / 2, t1y = (y1 + y2) / 2 - .15 * singlebarlength) %>%
-               mutate(t2x = (x1 + x2) / 2, t2y = (y1 + y2) / 2 + .15 * singlebarlength) %>%
-               mutate(t3x = (x1 + x2) / 2, t3y = (y1 + y2) / 2)
+               mutate(t1x = (x1 + x2) / 2 - barwidth * .12 * sign(x1), t1y = (y1 + y2) / 2 - .12 * barwidth) %>%
+               mutate(t2x = (x1 + x2) / 2 - barwidth * .12 * sign(x1), t2y = (y1 + y2) / 2 + .12 * barwidth) %>%
+               mutate(t3x = (x1 + x2) / 2 + barwidth * .12 * sign(x1), t3y = (y1 + y2) / 2)
           
           triples <- horiztriples %>%
                bind_rows(verttriples)
@@ -472,26 +492,29 @@ shinyServer(function(input, output, session) {
           inningnumbers <- data.frame(inn = c(1:max(allbars$inn))) %>%
                mutate(x = -1 * (xnudge + inn * barwidth + barwidth / 2), y = 0)
           
-          dotsize.big <- 3
-          dotsize.small <- 2
-          hrsize.big <- 5
-          hrsize.small <- 4
+          dotsize.big <- 4
+          dotsize.small <- 3
+          hrsize.big <- 7
+          hrsize.small <- 6
           
           #allbars$batorder <- factor(allbars$batorder, levels = c(1:9))
+          
+          scores <- scores %>% arrange(color)
           
           color.vec1 <- scores %>% arrange(color) %>% select(color) %>% distinct() %>% unlist(use.names = F)
           color.vec2 <- scores %>% arrange(color2) %>% select(color2) %>% distinct() %>% unlist(use.names = F)
           color.vec <- c(color.vec1, color.vec2)
+          names(color.vec) <- color.vec
           
           print(tail(allbars$winexp))
           
           ggplot() + geom_rect(data = allbars, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp), color = "white", size =2) + 
                geom_curve(data = segments, aes(x = x1, xend = x2, y = y1, yend = y2), curvature = -.5, size = 2, color = "gray") + 
                geom_segment(data = allbars, aes(x= -10 * max(allbars$inn) - 10, xend = 10 * max(allbars$inn) + 10, y = 0, yend = 0), color = "white", size = 5) + 
-               geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp, color = color), size =2) + 
+               geom_rect(data = scores, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, fill = winexp, color = color), size =2) + 
                #geom_rect(data = scores %>% arrange(color), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dotted", size =2, alpha = 0) + 
-               geom_rect(data = scores %>% arrange(color2), aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dashed", size = 1, alpha = 0) + 
-               scale_color_manual(values=color.vec) +
+               geom_rect(data = scores, aes(xmin=x1, xmax=x2, ymin=y1, ymax=y2, color = color2), linetype = "dashed", size = 1, alpha = 0) + 
+               scale_color_manual(values = color.vec) +
                geom_point(data = singles, aes(x, y), color = "white", size = dotsize.big) + 
                geom_point(data = singles, aes(x, y), color = "black", size = dotsize.small) + 
                geom_point(data = doubles, aes(d1x, d1y), color = "white", size = dotsize.big) + 
@@ -504,8 +527,9 @@ shinyServer(function(input, output, session) {
                geom_point(data = triples, aes(t1x, t1y), color = "black", size = dotsize.small) + 
                geom_point(data = triples, aes(t2x, t2y), color = "black", size = dotsize.small) + 
                geom_point(data = triples, aes(t3x, t3y), color = "black", size = dotsize.small) + 
-               geom_point(data = walks, aes(x, y), color = "black", size = dotsize.big) + 
-               geom_point(data = walks, aes(x, y), color = "white", size = dotsize.small) + 
+               #geom_point(data = walks, aes(x, y), color = "black", size = dotsize.big) + 
+               #geom_point(data = walks, aes(x, y), color = "white", size = dotsize.small) + 
+               geom_point(data = walks, aes(x, y), color = "green", size = dotsize.big, shape = 18) + 
                geom_point(data = homers, aes(x, y), color = "white", size = hrsize.big) + 
                geom_point(data = homers, aes(x, y), color = "black", size = hrsize.small, shape = 18) + 
                #geom_point(data = strikeouts, aes(x, y), color = "white", size = dotsize.big) + 
